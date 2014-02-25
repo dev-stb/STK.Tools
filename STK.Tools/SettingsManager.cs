@@ -131,7 +131,7 @@ namespace STK.Tools
 
         public void RegisterFileAssociation()
         {
-
+            // Visual Studio integration test
         }
 
         public void DeregisterFileAssociation()
