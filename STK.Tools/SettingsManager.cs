@@ -1,4 +1,5 @@
-﻿using System;
+﻿using Microsoft.Win32;
+using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -11,6 +12,7 @@ namespace STK.Tools
     public class SettingsManager
     {
         private Dictionary<string, object> values;
+        private Dictionary<string, object> dValues;
         public string FileAssociation { get; private set; }
         public FileInfo CurrentLoaded { get; private set; }
 
@@ -29,6 +31,17 @@ namespace STK.Tools
 
             FileAssociation = fileAssociation;
             values = new Dictionary<string, object>(defaultValues); // Copy dictionary to prevent external manipulation 
+            dValues = new Dictionary<string, object>(defaultValues); // Copy dictionary to prevent external manipulation 
+
+        }
+
+        /// <summary>
+        /// Unloads any loaded File and restores default values
+        /// </summary>
+        public void Reset()
+        {
+            values = new Dictionary<string, object>(dValues);
+            CurrentLoaded = null;
         }
 
         /// <summary>
@@ -38,15 +51,15 @@ namespace STK.Tools
         /// </summary>
         public void Save(string filename = null)
         {
-            bool filenameIsNotOK = String.IsNullOrWhiteSpace(filename);
+            bool filenameIsOK = !String.IsNullOrWhiteSpace(filename);
 
-            if (filenameIsNotOK && CurrentLoaded != null)
+            if (filenameIsOK && CurrentLoaded != null)
             {
                 Save(CurrentLoaded);
             }
             else
             {
-                if (filenameIsNotOK)
+                if (!filenameIsOK)
                     throw new ArgumentNullException("filename");
                 if (filename.Any(a => Path.GetInvalidFileNameChars().Contains(a)))
                     throw new ArgumentException("filename", "May not contain any illegal characters");
@@ -98,14 +111,6 @@ namespace STK.Tools
             }
         }
 
-        public class item
-        {
-            [XmlAttribute]
-            public string key;
-            [XmlAttribute]
-            public object value;
-        }
-
         public T Get<T>(String key)
         {
             if (String.IsNullOrWhiteSpace(key))
@@ -131,20 +136,70 @@ namespace STK.Tools
 
         public void RegisterFileAssociation()
         {
-            // Visual Studio integration test
+            var exe = System.Reflection.Assembly.GetEntryAssembly();
+            if (exe == null)
+                exe = System.Reflection.Assembly.GetCallingAssembly();
+            try
+            {
+                Registry
+                    .CurrentUser.OpenSubKey(@"Software\Classes", true)
+                    .CreateSubKey("." + FileAssociation)
+                    .SetValue("", FileAssociation + "_File", RegistryValueKind.String);
+                Registry
+                   .CurrentUser.OpenSubKey(@"Software\Classes\" + FileAssociation + "_File", true)
+                    .CreateSubKey("DefaultIcon")
+                    .SetValue("", exe.Location, RegistryValueKind.String);
+                Registry
+                   .CurrentUser.OpenSubKey(@"Software\Classes", true)
+                    .CreateSubKey(FileAssociation + "_File" + @"\shell\open\command")
+                    .SetValue("", exe.Location + " \"%1\"", RegistryValueKind.String);
+            }
+            catch (UnauthorizedAccessException)
+            {
+            }
         }
 
         public void DeregisterFileAssociation()
         {
-
+            try
+            {
+                Registry
+                    .CurrentUser.OpenSubKey(@"Software\Classes", true)
+                   .DeleteSubKey("." + FileAssociation);
+                Registry
+                     .CurrentUser.OpenSubKey(@"Software\Classes", true)
+                    .DeleteSubKey(FileAssociation + "_File" + @"\shell\open\command");
+            }
+            catch (UnauthorizedAccessException)
+            {
+            }
         }
 
         public bool IsFileAssociationRegisterd
         {
             get
             {
-                bool ret = false;
+                bool ret = true;
+                try
+                {
+                    var exe = System.Reflection.Assembly.GetEntryAssembly();
+                    if (exe == null)
+                        exe = System.Reflection.Assembly.GetCallingAssembly();
 
+                    var key = Registry.CurrentUser.OpenSubKey(@"Software\Classes\" + FileAssociation + @"_File\shell\open\command");
+                    ret = key != null;
+
+                    if (ret)
+                    {
+                        var val = key.GetValue("") as string;
+                        ret = val != null;
+                        if (ret)
+                        {
+                            ret = val.CompareTo(exe.Location + " \"%1\"") == 0;
+                        }
+                    }
+                }
+                catch { ret = false; }
                 return ret;
             }
         }
